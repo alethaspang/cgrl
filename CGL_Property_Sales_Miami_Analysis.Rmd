@@ -1,0 +1,834 @@
+---
+title: "Property Value Analysis"
+output: html_notebook
+
+---
+## Explanation
+
+Aletha Spang and Dr. Luis Alvarez Leon, 2025.
+
+The following notebook contains R code that was used to conduct analysis of real estate prices in Miami between 2020 and 2022. Point level datasets on property sales were obtained from ATTOM Data Solutions and are kept private in alignment with our use agreement. 
+
+The methods of analysis used below could be applied to similar datasets to get comparable results.
+
+----------------------------------------------------------------------------------------------------------
+
+## R Notebook Intro
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE
+                      , comment = NA
+                      , warning = FALSE
+                      , error = FALSE
+                      , message = FALSE
+                      , tidy = TRUE)
+
+knitr::opts_knit$set(root.dir = '//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Data') #Set working directory
+```
+
+
+------------------------------------------------------------------------------------------------------
+## Install and load packages
+
+Run the following code if you need to install any necessary R packages (Make sure RTools is installed on computer):
+```{r}
+install.packages("sf")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("tidyverse")
+install.packages("ggpmisc")
+```
+
+Load packages:
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+```
+
+
+-------------------------------------------------------------------------------------------------------
+## Read in data
+
+Takes some time to run the following commands to load ATTOM data. 
+
+```{r}
+tax_0001 <- read.delim("//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Data/DARTMOUTH_TAXASSESSOR_0001.txt") #takes a while to load
+
+```
+
+
+
+## Cleaning and subsetting data
+
+Takes text files and converts them to spatial data, removing any records that do not have spatial geometry, and pulling out only fields of interest. Finally, reprojects points into Florida UTM Zone 17N coordinate system.
+
+
+```{r}
+tax_filtered <- subset(tax_0001, PropertyLongitude != "NA" & PropertyLatitude != "NA") # Create subset of records where latitude and longitude are not null
+
+assessed_all_pts <- tax_filtered |> # Pipe in filtered dataset
+  select(TaxYearAssessed, TaxAssessedValueTotal, PreviousAssessedValue, AssessorLastSaleDate, AssessorLastSaleAmount, PropertyUseGroup, PropertyLongitude, PropertyLatitude) # column names of interest from entire dataset
+
+## Convert to Spatial Data
+
+tax_sf <- sf::st_as_sf(tax_filtered, coords = c("PropertyLongitude","PropertyLatitude"), crs = 4326)
+
+## Reproject data
+
+proj_tax = sf::st_transform(tax_sf, "EPSG:26717") # reproject points from WGS 84 to UTM Zone 17N
+```
+
+---------------------------------------------------------------------------------------------------------
+
+## Aggregate to Neighborhoods
+
+Assign each data point the name of which neighborhood it is within.
+
+```{r}
+## Read in Miami neighborhood data 
+
+nbhd_boundaries <- read_sf('//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Data/Miami_Neighborhoods_Proj.shp')
+
+# Hand digitized this layer based on Miami map
+common_nbhd <- read_sf('//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Data/Neighborhoods_Common_Polygons.shp')
+
+## Reproject neighborhood boundaries to same coordinate system as points
+
+proj_nbhd <- sf::st_transform(common_nbhd, "EPSG:26717")
+
+## Spatial join tax points with neighborhoods
+
+nbhd_tax <- sf::st_intersection(proj_nbhd, proj_tax) # Make sure using projected versions of both datasets, otherwise 
+# they will not line up properly
+```
+
+
+## Subset properties by year and sector
+
+```{r}
+## Filter property values
+
+filtered_values <- nbhd_tax |>
+  filter_all(any_vars(! is.na(.))) # filter out NA variables
+
+date_filtered_values <- nbhd_tax |>
+  subset(TaxAssessedValueTotal != "") # where value in column does NOT equal "blank
+
+non_zero_values <- date_filtered_values |>
+  subset(TaxAssessedValueTotal != "0") # filter out sales that are $0
+
+# Change format of date 
+
+date_years <- non_zero_values |>
+  mutate(lastsaleyear = format(as.Date(AssessorLastSaleDate, format="%Y-%m-%d"),"%Y")) 
+
+# Assign subsets based on years and commercial/residential
+
+commercial_2019 <- date_years |>
+  subset(lastsaleyear == "2019") |>
+  subset(PropertyUseGroup == "Commercial")
+
+commercial_2020 <- date_years |>
+  subset(lastsaleyear == "2020") |>
+  subset(PropertyUseGroup == "Commercial")
+
+commercial_2021 <- date_years |>
+  subset(lastsaleyear == "2021") |>
+  subset(PropertyUseGroup == "Commercial")
+
+commercial_2022 <- date_years |>
+  subset(lastsaleyear == "2022") |>
+  subset(PropertyUseGroup == "Commercial")
+
+commercial_2023 <- date_years |>
+  subset(lastsaleyear == "2023") |>
+  subset(PropertyUseGroup == "Commercial")
+
+residential_2019 <- date_years |>
+  subset(lastsaleyear == "2019") |>
+  subset(PropertyUseGroup == "Residential")
+
+residential_2020 <- date_years |>
+  subset(lastsaleyear == "2020") |>
+  subset(PropertyUseGroup == "Residential")
+
+residential_2021 <- date_years |>
+  subset(lastsaleyear == "2021") |>
+  subset(PropertyUseGroup == "Residential")
+
+residential_2022 <- date_years |>
+  subset(lastsaleyear == "2022") |>
+  subset(PropertyUseGroup == "Residential")
+
+residential_2023 <- date_years |>
+  subset(lastsaleyear == "2023") |>
+  subset(PropertyUseGroup == "Residential")
+```
+
+```{r}
+write.csv(commercial_2019, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Commercial_Sales_2019.csv", row.names = FALSE)
+write.csv(commercial_2020, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Commercial_Sales_2020.csv", row.names = FALSE)
+write.csv(commercial_2021, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Commercial_Sales_2021.csv", row.names = FALSE)
+write.csv(commercial_2022, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Commercial_Sales_2022.csv", row.names = FALSE)
+
+
+write.csv(residential_2019, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Residential_Sales_2019.csv", row.names = FALSE)
+write.csv(residential_2020, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Residential_Sales_2020.csv", row.names = FALSE)
+write.csv(residential_2021, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Residential_Sales_2021.csv", row.names = FALSE)
+write.csv(residential_2022, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/All_Residential_Sales_2022.csv", row.names = FALSE)
+```
+
+
+## Find total property sales value for each neighborhood
+
+```{r}
+# Create new subsets for sums
+avg_commercial_2019 <- commercial_2019 |>
+  group_by(Name)|> # group features based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal), na.rm = TRUE) # This creates a new column containing summed values, and removes any NA values (might be unnecessary, but just to be safe)
+
+avg_commercial_2020 <- commercial_2020 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_commercial_2021 <- commercial_2021 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_commercial_2022 <- commercial_2022 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_commercial_2023 <- commercial_2023 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_residential_2019 <- residential_2019 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_residential_2020 <- residential_2020 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_residential_2021 <- residential_2021 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_residential_2022 <- residential_2022 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE) 
+
+avg_residential_2023 <- residential_2023 |> 
+  group_by(Name)|> # Group points based on neighborhood name
+  summarize(TotalSalesValue = sum(TaxAssessedValueTotal
+  ), na.rm =TRUE)
+```
+
+# Convert to tables
+
+We will join these tables to the existing Miami neighborhoods shapefile, so we will want to convert from sf to df tables by dropping their geometry. 
+
+```{r}
+avg_commercial_2019_df <- avg_commercial_2019 |>
+  mutate(SumSalesPrice2019 = TotalSalesValue)|> # Also renaming the sum price column so easier to understand
+  sf::st_drop_geometry() 
+
+avg_commercial_2020_df <- avg_commercial_2020 |>
+  mutate(SumSalesPrice2020 = TotalSalesValue)|>
+  sf::st_drop_geometry() 
+
+avg_commercial_2021_df <- avg_commercial_2021 |>
+  mutate(SumSalesPrice2021 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_commercial_2022_df <- avg_commercial_2022 |>
+  mutate(SumSalesPrice2022 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_commercial_2023_df <- avg_commercial_2023 |>
+  mutate(SumSalesPrice2023 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_residential_2019_df <- avg_residential_2019 |>
+  mutate(SumSalesPrice2019 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_residential_2020_df <- avg_residential_2020 |>
+  mutate(SumSalesPrice2020 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_residential_2021_df <- avg_residential_2021 |>
+  mutate(SumSalesPrice2021 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_residential_2022_df <- avg_residential_2022 |>
+  mutate(SumSalesPrice2022 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+
+avg_residential_2023_df <- avg_residential_2023 |>
+  mutate(SumSalesPrice2023 = TotalSalesValue)|>
+  sf::st_drop_geometry()
+```
+
+# Remove duplicated records
+
+We will want just one average value for each neighborhood, so make sure there are no duplicates. 
+
+```{r}
+commercial_2019_undup <- avg_commercial_2019_df[!duplicated(avg_commercial_2019_df$Name), ]
+commercial_2020_undup <- avg_commercial_2020_df[!duplicated(avg_commercial_2020_df$Name), ]
+commercial_2021_undup <- avg_commercial_2021_df[!duplicated(avg_commercial_2021_df$Name), ]
+commercial_2022_undup <- avg_commercial_2022_df[!duplicated(avg_commercial_2022_df$Name), ]
+commercial_2023_undup <- avg_commercial_2023_df[!duplicated(avg_commercial_2023_df$Name), ]
+
+residential_2019_undup <- avg_residential_2019_df[!duplicated(avg_residential_2019_df$Name), ]
+residential_2020_undup <- avg_residential_2020_df[!duplicated(avg_residential_2020_df$Name), ]
+residential_2021_undup <- avg_residential_2021_df[!duplicated(avg_residential_2021_df$Name), ]
+residential_2022_undup <- avg_residential_2022_df[!duplicated(avg_residential_2022_df$Name), ]
+residential_2023_undup <- avg_residential_2023_df[!duplicated(avg_residential_2023_df$Name), ]
+```
+
+## Join property values to neighborhood shapefile
+```{r}
+# Join tables with property prices for all 5 years, both commercial and residential
+avg_commercial_nbhd <- proj_nbhd |>
+  left_join(commercial_2019_undup, by = "Name")|> # Using name of neighborhood as linking key... should be identical as both columns came from the same source
+  left_join(commercial_2020_undup, by = "Name")|>
+  left_join(commercial_2021_undup, by = "Name")|>
+  left_join(commercial_2022_undup, by = "Name")|>
+  left_join(commercial_2023_undup, by = "Name")|>
+  st_drop_geometry()
+
+avg_residential_nbhd <- proj_nbhd |>
+  left_join(residential_2019_undup, by = "Name")|>
+  left_join(residential_2020_undup, by = "Name")|>
+  left_join(residential_2021_undup, by = "Name")|>
+  left_join(residential_2022_undup, by = "Name")|>
+  left_join(residential_2023_undup, by = "Name")|>
+  st_drop_geometry()
+
+```
+
+## Write data to CSVs
+
+In case you want to look at tables outside of R.
+
+```{r}
+write.csv(avg_commercial_nbhd, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Data/Sum_Prices_Commercial_Common.csv", row.names = FALSE)
+write.csv(avg_residential_nbhd, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Data/Sum_Prices_Residential_Common.csv", row.names = FALSE)
+```
+
+
+## Plot data by neighborhood
+
+Plots will show yearly quarters on the x axis and real estate sales on the y axis.
+
+## Little Haiti
+
+
+```{r}
+# Create a subset of property sales that only contains neighborhood
+lh_subset <- non_zero_values |>
+  mutate(lastsaleyear = format(as.Date(AssessorLastSaleDate, format="%Y-%m-%d"),"%Y")) |> # Add new column that just has year values
+  subset(LABEL == "Little Haiti") |>
+  subset(lastsaleyear > 2019) |> # Everything from 2019 onward
+  subset(AssessorLastSaleAmount != "NA") |> # Getting rid of extraneous values
+  subset(AssessorLastSaleAmount != "0") 
+
+# If you plot by date now, the x axis is overwhelming (by day)
+
+# Want to convert dates into quarters instead. 
+
+lh_qrt <- lh_subset |>
+  separate(col = AssessorLastSaleDate, into = c('yr', 'mnth', 'dy'), sep = '-', convert = TRUE, remove = FALSE) # Separates date into year, month, and day
+
+# Creates quarter assignments
+lh_qrt_final <- 
+  lh_qrt %>% 
+  # make quarters
+  mutate(
+    quarter = case_when(
+      mnth >= 1 & mnth <= 3 ~ 'Q1'
+      , mnth >= 4 & mnth <= 6 ~ 'Q2'
+      , mnth >= 7 & mnth <= 9 ~ 'Q3'
+      , mnth >= 10 & mnth <= 12 ~ 'Q4' )) # Based on which month the sale falls within
+
+# Create a new column to hold the quarter assignment
+lh_qrt_final <- lh_qrt_final |>
+  mutate (quarteryear = paste(lh_qrt_final$lastsaleyear, ' ', quarter) )
+
+
+# Find the mean sales price for each quarter, in total
+lh_mean <- lh_qrt_final |>
+  group_by(quarteryear) |>
+  summarise(meanprice = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+# Mean sales price for only commercial
+lh_com_mean <- lh_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Commercial") |>
+  summarise(comm_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+# Mean sales price for only residential
+lh_res_mean <- lh_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Residential") |>
+  summarise(res_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+# Join together all three different averages (total, commercial, residential)
+lh_comm_mean_join <- left_join(lh_mean, lh_com_mean)
+```
+
+### Plot total property sales
+
+```{r}
+lh_comres_mean <- left_join(lh_comm_mean_join, lh_res_mean)
+
+# Plot 
+
+lhmeanplot <- ggplot(lh_mean,
+                       aes(x = quarteryear, 
+                           y = meanprice,
+                           group = 1)) + # Create ggplot object showing lh_mean data, with these x and y values
+  geom_line()+ # Use line geometry for the plot
+  labs(title = "Property Sales Price in Little Haiti, Miami", y = "Last Sale Price ($)", x = "Year") # Title and axis titles
+
+lhmeanplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic() # Calling the object to actually plot it, while changing formatting of numbers to NOT be scientific notation.
+```
+
+### Plot prices by sector
+
+```{r}
+lhx1 = lh_comres_mean$quarteryear # X axis will show yearly quarters
+lhy1 = lh_comres_mean$meanprice # Total mean
+lhy2 = lh_comres_mean$comm_mean_price # Commercial mean
+lhy3 = lh_comres_mean$res_mean_price # Residential mean
+
+legend_colors <- c("All Property Sale Prices" = "black", "Commercial Sale Prices" = "red", "Residential Property Sale Prices" = "blue")
+
+lhcomresplot <- ggplot(lh_comres_mean, aes(x = lhx1, group = 1)) +
+  geom_line(aes(y = lhy1), color = "black") +
+  geom_line(aes(y = lhy2), color = "red") +
+  geom_line(aes(y = lhy3), color = "blue") +
+  labs(title = "Property Sales in Little Haiti, 2019 - 2023", y = "Price ($)", x = "Year") +
+  scale_color_manual(values = legend_colors)
+
+lhcomresplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+```
+
+### Scatterplot
+
+```{r}
+lhscatterplot <- ggplot(lh_qrt_final, aes(x = quarteryear, y = AssessorLastSaleAmount, col = PropertyUseGroup))+
+  geom_point()+
+  #stat_poly_line() # commented out because didn't work
+  geom_smooth(method = "lm") 
+
+lhscatterplot +  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+```
+
+## Brickell
+
+### Plot total property sales price
+
+```{r}
+brickell_subset <- date_filtered_values |>
+  mutate(lastsaleyear = format(as.Date(AssessorLastSaleDate, format="%Y-%m-%d"),"%Y")) |> # Add new column that just has year values
+  subset(LABEL == "Brickell Business District") |>
+  subset(lastsaleyear > 2018) |>
+  subset(AssessorLastSaleAmount != "NA") |>
+  subset(AssessorLastSaleAmount != "0")
+
+brickell_qrt <- brickell_subset |>
+  separate(col = AssessorLastSaleDate, into = c('yr', 'mnth', 'dy'), sep = '-', convert = TRUE, remove = FALSE)
+
+brickell_qrt_final <- 
+  brickell_qrt %>% 
+  # make quarters
+  mutate(
+    quarter = case_when(
+      mnth >= 1 & mnth <= 9 ~ 'Q1'
+      , mnth >= 4 & mnth <= 12 ~ 'Q2'
+      , mnth >= 7 & mnth <= 3 ~ 'Q3'
+      , mnth >= 10 & mnth <= 6 ~ 'Q4' ) )
+
+# Add in a new column to hold quarter assignment
+brickell_qrt_final <- brickell_qrt_final |>
+  mutate (quarteryear = paste(brickell_qrt_final$lastsaleyear, ' ', quarter) )
+
+# Add in commercial and residential
+bk_mean <- brickell_qrt_final |>
+  group_by(quarteryear) |>
+  summarise(meanprice = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+bk_com_mean <- brickell_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Commercial") |>
+  summarise(comm_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+bk_res_mean <- brickell_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Residential") |>
+  summarise(res_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+# Join
+bk_comm_mean_join <- left_join(bk_mean, bk_com_mean)
+
+bk_comres_mean <- left_join(bk_comm_mean_join, bk_res_mean)
+
+# Find mean property sales price
+brickellplot <- ggplot(bk_mean,
+                      aes(x = quarteryear, 
+                          y = meanprice,
+                          group = 1)) +
+  geom_line()+
+  labs(title = "Property Sales Price in Brickell Industrial District, Miami", y = "Last Sale Price ($)", x = "Year") 
+
+brickellplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+
+```
+
+### Plot prices by sector 
+
+```{r}
+bkx1 = bk_comres_mean$quarteryear # X axis will show yearly quarters
+bky1 = bk_comres_mean$meanprice # Total mean
+bky2 = bk_comres_mean$comm_mean_price # Commercial mean
+bky3 = bk_comres_mean$res_mean_price # Residential mean
+
+bkcomresplot <- ggplot(bk_comres_mean, aes(x = bkx1, group = 1)) +
+  geom_line(aes(y = bky1), color = "black") +
+  geom_line(aes(y = bky2), color = "red") +
+  geom_line(aes(y = bky3), color = "blue") +
+  labs(title = "Property Sales in Brickell Industrial District, 2019 - 2023", y = "Price ($)", x = "Year") +
+  scale_color_manual(values = legend_colors)
+
+bkcomresplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+```
+
+Scatterplot:
+
+```{r}
+bkscatterplot <- ggplot(brickell_qrt_final, aes(x = quarteryear, y = AssessorLastSaleAmount, col = PropertyUseGroup))+
+  geom_point()+
+  #geom_smooth()
+  stat_poly_line()
+
+
+bkscatterplot +  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+
+```
+
+
+## Wynwood
+
+Lineplot of average sales price:
+
+```{r}
+wynwood_subset <- date_filtered_values |>
+  mutate(lastsaleyear = format(as.Date(AssessorLastSaleDate, format="%Y-%m-%d"),"%Y")) |> # Add new column that just has year values
+  subset(LABEL == "Wynwood Industrial District") |>
+  subset(lastsaleyear > 2018) |>
+  subset(AssessorLastSaleAmount != "NA") |>
+  subset(AssessorLastSaleAmount != "0")
+
+wynwood_qrt <- wynwood_subset |>
+  separate(col = AssessorLastSaleDate, into = c('yr', 'mnth', 'dy'), sep = '-', convert = TRUE, remove = FALSE)
+
+wynwood_qrt_final <- 
+  wynwood_qrt %>% 
+  # make quarters
+  mutate(
+    quarter = case_when(
+      mnth >= 1 & mnth <= 9 ~ 'Q1'
+      , mnth >= 4 & mnth <= 12 ~ 'Q2'
+      , mnth >= 7 & mnth <= 3 ~ 'Q3'
+      , mnth >= 10 & mnth <= 6 ~ 'Q4' ) )
+
+# Add in a new column to hold quarter assignment
+wynwood_qrt_final_2 <- wynwood_qrt_final |>
+  mutate (quarteryear = paste(wynwood_qrt_final$lastsaleyear, ' ', quarter) )
+
+# Add in commercial and residential
+# This actually wasn't super useful because there are no residential properties
+# But leaving in here anyway
+# Skip to next for plot of just property sales
+ww_mean <- wynwood_qrt_final_2 |>
+  group_by(quarteryear) |>
+  summarise(meanprice = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+ww_com_mean <- wynwood_qrt_final_2 |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Commercial") |>
+  summarise(comm_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+ww_res_mean <- wynwood_qrt_final_2 |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Residential") |>
+  summarise(res_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+# Join
+ww_comm_mean_join <- left_join(ww_mean, ww_com_mean)
+
+ww_comres_mean <- left_join(ww_comm_mean_join, ww_res_mean)
+
+wynwoodplot <- ggplot(ww_mean,
+                       aes(x = quarteryear, 
+                           y = meanprice,
+                           group = 1)) +
+  geom_line()+
+  stat_poly_line() +
+  labs(title = "Property Sales Price in Wynwood Industrial District, Miami", y = "Last Sale Price ($)", x = "Year") 
+
+wynwoodplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+
+```
+
+Sales price separated by use type:
+
+
+```{r}
+wwx1 = ww_comres_mean$quarteryear # X axis will show yearly quarters
+wwy1 = ww_comres_mean$meanprice # Total mean
+wwy2 = ww_comres_mean$comm_mean_price # Commercial mean
+wwy3 = ww_comres_mean$res_mean_price # Residential mean
+
+wwcomresplot <- ggplot(ww_comres_mean, aes(x = wwx1, group = 1)) +
+  geom_line(aes(y = wwy1), color = "black") +
+  geom_line(aes(y = wwy2), color = "red") +
+  geom_line(aes(y = wwy3), color = "blue") +
+  labs(title = "Property Sales in Wynwood Industrial District, 2019 - 2023", y = "Price ($)", x = "Year") +
+  scale_color_manual(values = legend_colors)
+
+wwcomresplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+```
+
+Scatterplot:
+
+```{r}
+wwscatterplot <- ggplot(wynwood_qrt_final_2, aes(x = quarteryear, y = AssessorLastSaleAmount, col = PropertyUseGroup))+
+  geom_point()+
+  geom_smooth()
+
+wwscatterplot +  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+```
+
+## Overtown
+
+Lineplot of average sales price:
+
+```{r}
+ot_subset <- date_filtered_values |>
+  mutate(lastsaleyear = format(as.Date(AssessorLastSaleDate, format="%Y-%m-%d"),"%Y")) |> # Add new column that just has year values
+  subset(LABEL == "Northeast Overtown" | LABEL == "Southeast Overtown") |>
+  subset(lastsaleyear > 2019) |>
+  subset(AssessorLastSaleAmount != "NA") |>
+  subset(AssessorLastSaleAmount != "0") |>
+  st_drop_geometry()
+
+ot_qrt <- ot_subset |>
+  separate(col = AssessorLastSaleDate, into = c('yr', 'mnth', 'dy'), sep = '-', convert = TRUE, remove = FALSE)
+
+ot_qrt_final <- 
+  ot_qrt %>% 
+  # make quarters
+  mutate(
+    quarter = case_when(
+      mnth >= 1 & mnth <= 9 ~ 'Q1'
+      , mnth >= 4 & mnth <= 12 ~ 'Q2'
+      , mnth >= 7 & mnth <= 3 ~ 'Q3'
+      , mnth >= 10 & mnth <= 6 ~ 'Q4' ) )
+
+# Add in a new column to hold quarter assignment
+ot_qrt_final <- ot_qrt_final |>
+  mutate (quarteryear = paste(ot_qrt_final$lastsaleyear, ' ', quarter) )
+
+ot_mean <- ot_qrt_final |>
+  group_by(quarteryear) |>
+  summarise(meanprice = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+ot_com_mean <- ot_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Commercial") |>
+  summarise(comm_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+ot_res_mean <- ot_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Residential") |>
+  summarise(res_mean_price = mean(AssessorLastSaleAmount, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+# Join
+ot_comm_mean_join <- left_join(ot_mean, ot_com_mean)
+
+ot_comres_mean <- left_join(ot_comm_mean_join, ot_res_mean)
+
+overtownplot <- ggplot(ot_mean,
+                       aes(x = quarteryear, 
+                           y = meanprice,
+                           group = 1)) +
+  geom_line()+
+  stat_poly_line() +
+  labs(title = "Property Sales Price in Overtown, Miami", y = "Last Sale Price ($)", x = "Year") 
+
+overtownplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+
+```
+
+Sales price broken out by use type:
+
+```{r}
+otx1 = ot_comres_mean$quarteryear # X axis will show yearly quarters
+oty1 = ot_comres_mean$meanprice # Total mean
+oty2 = ot_comres_mean$comm_mean_price # Commercial mean
+oty3 = ot_comres_mean$res_mean_price # Residential mean
+
+otcomresplot <- ggplot(ot_comres_mean, aes(x = otx1, group = 1)) +
+  geom_line(aes(y = oty1), color = "black") +
+  geom_line(aes(y = oty2), color = "red") +
+  geom_line(aes(y = oty3), color = "blue") +
+  labs(title = "Property Sales in Overtown, 2019 - 2023", y = "Price ($)", x = "Year") +
+  scale_color_manual(values = legend_colors)
+
+otcomresplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+```
+
+
+## Miami
+
+```{r}
+# Create subset and prepare data
+miami_subset <- date_filtered_values |>
+  mutate(lastsaleyear = format(as.Date(AssessorLastSaleDate, format="%Y-%m-%d"),"%Y")) |> # Add new column that just has year values
+  subset(lastsaleyear > 2017) |>
+  subset(lastsaleyear < 2023) |>
+  subset(TaxAssessedValueTotal != "NA") |>
+  subset(TaxAssessedValueTotal != "0")
+
+miami_qrt <- miami_subset |>
+  separate(col = AssessorLastSaleDate, into = c('yr', 'mnth', 'dy'), sep = '-', convert = TRUE, remove = FALSE)
+
+miami_qrt$yr_small <- strftime(x = miami_subset$AssessorLastSaleDate, format = '%y', tz = 'GMT')
+miami_qrt$yr_small <- as.numeric(miami_qrt$yr_small)
+
+miami_qrt_final <- 
+  miami_qrt %>% 
+  # make quarters
+  mutate(
+    quarter = case_when(
+      mnth >= 1 & mnth <= 3 ~ 'Q1'
+      , mnth >= 4 & mnth <= 6 ~ 'Q2'
+      , mnth >= 7 & mnth <= 9 ~ 'Q3'
+      , mnth >= 10 & mnth <= 12 ~ 'Q4' ) )
+
+# Add in a new column to hold quarter assignment
+miami_qrt_final <- miami_qrt_final |>
+  mutate (quarteryear = paste(miami_qrt_final$lastsaleyear, ' ', quarter) )
+
+# Look to see what is going on with spike in 2019 Q1
+test_miami_qrt_final <- miami_qrt_final |>
+  subset(PropertyUseGroup != "Residential")|>
+  subset(PropertyUseGroup != "Commercial") |>
+  subset(quarteryear == "2019   Q1")
+
+# Find totals
+miami_sum <- miami_qrt_final |>
+  group_by(quarteryear) |>
+  summarise(sumprice = sum(TaxAssessedValueTotal, na.rm = TRUE))
+
+miami_com_sum <- miami_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Commercial") |>
+  summarise(comm_sum_price = sum(TaxAssessedValueTotal, na.rm = TRUE)) |>
+  st_drop_geometry()
+
+miami_res_sum <- miami_qrt_final |>
+  group_by(quarteryear) |>
+  subset(PropertyUseGroup == "Residential") |>
+  summarise(res_sum_price = sum(TaxAssessedValueTotal, na.rm = TRUE)) |>
+  st_drop_geometry()
+  
+# Now can join these two dataframes with the miami_mean object
+miami_com_sum_join <- left_join(miami_sum, miami_com_sum)
+
+miami_comres_sum <- left_join(miami_com_sum_join, miami_res_sum)
+
+miamisumplot <- ggplot(miami_sum,
+                      aes(x = quarteryear, 
+                          y = sumprice,
+                          group = 1)) +
+  geom_line()+
+  labs(title = "Total Property Sales Value in Miami", y = "Assessed Value ($)", x = "Year") 
+
+miamimeanplot + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE)) + theme_classic()
+```
+
+Sales price broken up by use type:
+
+```{r}
+# Specify variables for each of the mean price columns
+x1 = miami_comres_sum$quarteryear # X axis will show yearly quarters
+y1 = miami_comres_sum$sumprice # Total mean
+y2 = miami_comres_sum$comm_sum_price # Commercial mean
+y3 = miami_comres_sum$res_sum_price # Residential mean
+
+legend_colors <- c("All Property Sale Value" = "black", "Commercial Sale Value" = "red", "Residential Property Sale Value" = "blue")
+
+summiamicomres <- ggplot(miami_mean, aes(x = x1, group = 1)) +
+                            geom_line(aes(y = y1), color = "black") +
+                            geom_line(aes(y = y2), color = "red") +
+                            geom_line(aes(y = y3), color = "blue") +
+  labs(title = "Property Sales Value in Miami, 2017 - 2022", y = "Property Sales Value ($)", x = "Year") +
+  scale_color_manual(values = legend_colors)
+ 
+
+my_plot = summiamicomres + scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE)) + theme_classic()
+
+# Export PDF of plot
+ggsave("//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/Miami_Tech_Paper_2025/Property_Value_Miami.pdf", my_plot, width = 6, height = 4)
+
+
+```
+
+Scatterplot:
+
+```{r}
+
+miamiscatterplot <- ggplot(miami_qrt_final, aes(x = quarteryear, y = AssessorLastSaleAmount, col = PropertyUseGroup))+
+  geom_point()
+  #geom_smooth()
+
+miamiscatterplot +  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = function(x) format(x, big.mark = ",", scientific = FALSE))+ theme_classic()
+
+```

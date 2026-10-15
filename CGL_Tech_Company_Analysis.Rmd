@@ -1,0 +1,1259 @@
+---
+title: "Tech Company Investigations"
+output: html_notebook
+
+Aletha Spang, Dr. Luis Alvarez Leon, August 2024
+---
+
+This is a notebook used to run code that identifies tech businesses from the larger national Crunchbase dataset and classifies them into different industries.
+
+To insert new code chunks into the notebook, use ctrl + alt + i to insert new code chunks.
+
+
+#Knit notebook
+
+The following code will knit the markdown notebook. This will likely be different in every computer, so take some time to update this and figure out what your proper location is.
+
+```{r}
+rmarkdown::render("Tech_Business_Investigations.Rmd")
+```
+
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE
+                      , comment = NA
+                      , warning = FALSE
+                      , error = FALSE
+                      , message = FALSE
+                      , tidy = TRUE)
+
+knitr::opts_knit$set(root.dir = 'file path') #Replace 'file path' with working directory file path
+setwd("file path") #Replace 'file path' with working directory file path
+
+```
+
+#Load packages:
+
+These will need to be installed on your computer before you can load them. If not already installed, un-comment out this code by highlighting all lines and using ctrl + shift+ c:
+```{r}
+# install.packages("sf")
+# install.packages("dplyr")
+# install.packages("ggplot2")
+# install.packages("tidyverse")
+# install.packages("stringr")
+# install.packages("lubridate")
+```
+
+Load the libraries:
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(tidyr)
+library(lubridate)
+```
+
+#Load data 
+
+Datasets should be located in the same folder as this markdown notebook.
+
+original_businesses.csv is a list of businesses that we compiled manually from media analysis.
+crunchbase_businesses.csv is a list of all businesses in US, downloaded directly from the crunchbase api (with paid subscription).
+
+```{r}
+original_businesses <- read.csv("...file path/original_businesses.csv") # Update paths to match where your files are stored
+crunchbase_businesses <- read.csv("...file path/crunchbase_businesses.csv") # Update paths to match where your files are stored
+```
+
+# Create subset of Miami businesses
+
+First, we will need to subset out only businesses in our study area, Miami Dade County, FL.
+
+Check which field includes this information:
+```{r}
+head(crunchbase_businesses)
+nrow(crunchbase_businesses)
+```
+
+Filter out businesses that are in Florida, and check how cities are labeled:
+
+```{r}
+florida = crunchbase_businesses %>%
+  dplyr::filter(region == "Florida") 
+
+print(florida['city'])
+```
+Filter for businesses in Miami. Can look through head to make sure it worked.
+```{r}
+miami_businesses <- florida %>%
+  dplyr::filter(city == "Miami")
+
+head(miami_businesses)
+nrow(miami_businesses)
+```
+# Tech Subset
+
+This group of Miami businesses includes all businesses, not just tech. First, we will need to subset the businesses based on whether they are tech or not.
+
+Inside the crunchbase table is a field including a short description of the company.
+
+```{r}
+head(miami_businesses) # Click through resulting pages to find it- should be towards the end.
+```
+First, we convert the short description to be all lower case so we don't have to deal with accounting for case differences. 
+
+```{r}
+miami_businesses$short_description_lower <- tolower(miami_businesses$short_description)
+
+head(miami_businesses)
+```
+Next we filter out all businesses that are tech.
+
+Keywords: fintech, tech (but not technique), crypto, robot, computer, device, software, cyber, hardware, cloud, web, digital, online, search engine, .com
+
+Note: we discovered it's important to put the \\ in front of .com, because the . is a regular expression that tells R to look for any one of those characters. 
+
+
+```{r}
+# And filtering out specific businesses from the name column
+# First create a column converting the name to lowercase
+miami_businesses$name_lower <- tolower(miami_businesses$name)
+
+# Filter out records by tech key words
+miami_tech_filtered <- miami_businesses %>% 
+  dplyr::filter((str_detect(short_description_lower, 'fintech|tech(!?nique, !?ical)|technology|crypto|blockchain|robot|computer|device|software|cyber|cloud|web(!?ing)|digital|online|search engine|\\.com| email|virtual|streaming|social network|facebook|twitter|mobile| app |internet|ipad |drone|ui ux|blog|cell phone|smartphone| ai |e-commerce')))
+
+# Filter out some businesses that are not tech
+crunchbase_tech_filtered <- miami_tech_filtered %>%
+  dplyr::filter(!(str_detect(name_lower, 'hospital|healthcare center|lexus|sports bar')))
+
+miami_nontech <- miami_businesses %>% 
+  dplyr::filter(!(str_detect(short_description_lower, 'fintech|tech(!?nique, !?ical)|technology|crypto|robot|computer|device|software|cyber|cloud|web|digital|online|search engine|\\.com| email|virtual|streaming|social network|facebook|twitter|mobile| app |internet|ipad |drone|ui ux|blog|cell phone|smartphone| ai ')))%>%
+  dplyr::filter(!(str_detect(name_lower, 'hospital|healthcare center|lexus|sports bar')))
+
+```
+
+We create another subset for businesses that were not pulled out as tech to check our query and make sure it's not missing any tech businesses.
+
+```{r}
+View(miami_nontech)
+View(crunchbase_tech_filtered)
+nrow(crunchbase_tech_filtered)
+```
+
+# Add new field for industry
+
+```{r}
+crunchbase_tech_filtered <- crunchbase_tech_filtered %>%
+  dplyr::mutate(industry = NA)
+
+View(crunchbase_tech_filtered)
+```
+
+
+
+# Healthcare subset:
+
+
+```{r}
+healthcare_subset <- crunchbase_tech_filtered %>% # Pipe in tech subset
+  dplyr::filter(str_detect(short_description_lower, paste(c("health(!?y)", "healthcare", "patient", "doctor", "medical", "surgery", "therapy", "dentist", "treatment", "cardio", "pharma", "clinical care", "surgical", "veterinary", "neurological", "dental", "breast feeding", "dermatology", "diagnostic", "nervous system", "orthoped", "disease", "mental health", "ultrasound", "x-ray"), collapse = "|"))) %>% # Filters out anything that doesn't contain these strings in short_description
+
+  # Then change the value in the industry field
+  mutate(industry = if_else(
+     is.na(industry),  # Check if the value is NA
+    "Healthcare",     # If NA, set to "Healthcare"
+    str_c(industry, "Healthcare", sep = ", ")  # Otherwise, append "Healthcare" with a comma
+  ))
+
+# Check remaining businesses
+non_health_subset <- crunchbase_tech_filtered %>% # Pipe in tech subset
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("health(!?y)", "healthcare", "patient", "doctor", "medical", "surgery", "therapy", "dentist", "treatment", "cardio", "pharma", "clinical care", "surgical", "veterinary", "neurological", "dental", "breast feeding", "dermatology", "diagnostic", "nervous system", "orthoped", "disease"), collapse = "|"))))
+
+```
+
+```{r}
+View(healthcare_subset)
+nrow(healthcare_subset)
+View(non_health_subset)
+```
+
+
+#Medical device subset:
+
+```{r}
+med_device_subset <- healthcare_subset %>% # Searching from within healthcare subset
+  dplyr::filter(str_detect(short_description_lower, paste(c("device", "robot", "machine", "gadget"), collapse = "|")))%>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Medical Device",
+    str_c(industry, "Medical Device", sep = ", ")
+  ))
+
+non_med_device <-  healthcare_subset %>% # Searching from within healthcare subset
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("device", "robot", "machine", "gadget"), collapse = "|"))))
+```
+
+
+```{r}
+View(med_device_subset)
+nrow(med_device_subset)
+View(non_med_device)
+```
+
+# Software subset
+
+```{r}
+software_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("software", "platform", "cloud", "application", "operating system", "developer", "development", "app", "it infrastructure", "web hosting", "web development", "web server", "database", "coding", "programming", "saas", "paas", "iaas", "enterprise", " seo ", "search engine optimization"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Software",
+    str_c(industry, "Software", sep = ", ")
+  ))
+
+non_software_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("software", "platform", "cloud", "application", "operating system", "developer", "development", "app", "it infrastructure", "web hosting", "web development", "web server", "database", "coding", "programming", "saas", "paas", "iaas", "enterprise", " seo ", "search engine optimization"), collapse = "|"))))
+```
+
+```{r}
+View(software_subset)
+nrow(software_subset)
+View(non_software_subset)
+```
+
+
+# Hardware subset
+
+```{r}
+hardware_subset <- non_software_subset %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("computer", "machine", "repair", "apple", "device", "electronics", "gadget", "laptop", "printers", "component", "vr goggles", "keyboard", "hand dryer", "Keyboard"), collapse = "|"))) %>%
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("online", "e-commerce", "ecommerce", "library", "web", "e-learning", "computer science"), collapse = "|")))) %>%
+  mutate(industry = if_else(
+    is.na(industry),
+    "Hardware",
+    str_c(industry, "Hardware", sep = ", ")
+  ))
+
+non_hardware <- non_software_subset %>%
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("computer", "machine", "repair", "apple", "device", "electronics", "gadget", "laptop", "printers", "component", "vr goggles", "keyboard", "hand dryer"), collapse = "|")))) %>%
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("online", "e-commerce", "ecommerce", "library", "web", "e-learning", "computer science"), collapse = "|"))))
+```
+
+
+```{r}
+nrow(hardware_subset)
+View(hardware_subset)
+View(non_hardware)
+```
+
+# Robotics and AI subset
+
+```{r}
+robotics_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("robot", " ai ", "artifical intelligence", "machine learning", "deep learning", "neural network", "chatgpt", "ai-", " ml "), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Robotics/AI",
+    str_c(industry, "Robotics/AI", sep = ", ")
+  ))
+
+```
+
+
+```{r}
+nrow(robotics_subset)
+View(robotics_subset)
+```
+
+
+
+# Finance subset
+
+
+```{r}
+finance_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("finance", "fintech", "crypto", "equity", "investment", "investor", "capital", "blockchain", "bitcoin", "accounting", "banking", "financ", "payment", "transaction", "credit card", "venture", "funding", "wealth", "asset", "portfolio management", "business management", "revenue", "insurance", "tax", "reimbursement", " loan"), collapse = "|"))) %>% # Not sure if strings are case-sensitive so covering my bases
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Finance",
+    str_c(industry, "Finance", sep = ", ")
+  ))
+```
+
+```{r}
+nrow(finance_subset)
+View(finance_subset)
+```
+
+
+# E-commerce subset
+```{r}
+ecommerce_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("commerce", "retail", "sales", "fashion", "buy", "sell", "shop", "online store"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "E-Commerce",
+    str_c(industry, "E-Commerce", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(ecommerce_subset)
+View(ecommerce_subset)
+```
+
+
+# Automotive subset
+
+Tried "vehicle" but gave terms like shopping cart or software that are a "vehicle for change..."
+
+```{r}
+automotive_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("car ", "cars ", "automobile", "automotive", "vehicles", "motor vehicle", "electric vehicle", "motor", "truck", "ridesharing"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Automotive",
+    str_c(industry, "Automotive", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(automotive_subset)
+View(automotive_subset)
+```
+
+
+# Construction subset
+
+```{r}
+construction_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("construction", "contractor", "buildings", "concrete", "steel","green building", "roof", "leed"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Construction",
+    str_c(industry, "Construction", sep = ", ")
+  ))
+```
+
+```{r}
+nrow(construction_subset)
+View(construction_subset)
+```
+
+
+# Energy subset
+
+
+Unsure about "gas" -> gives a software company that targets gas stations, among others. But that is technically the energy sector...
+
+
+```{r}
+energy_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("energy", "renewable", " oil", " gas ", "solar power", "solar panel", "wind turbine", "recycl", "gas-"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Energy",
+    str_c(industry, "Energy", sep = ", ")
+  ))
+```
+
+```{r}
+nrow(energy_subset)
+View(energy_subset)
+```
+
+
+# Aerospace/Defense
+
+```{r}
+aero_defense_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("aviation", "airline", "airplane", "plane", "military", "drone", "propulsion", "missile", "reconnaissance", "command", "weapon", "defense", "space exploration", "aeronautic", "aerospace", "airport", "aircraft", "aviat", "avionic"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Aerospace/Defense",
+    str_c(industry, "Aerospace/Defense", sep = ", ")
+  ))
+```
+
+```{r}
+nrow(aero_defense_subset)
+View(aero_defense_subset)
+```
+
+
+# Security subset
+
+```{r}
+security_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("security", "surveillance", "alarm system", "face detection", "personal safety", "police", "policing"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Security",
+    str_c(industry, "Security", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(security_subset)
+View(security_subset)
+```
+
+
+# Telecommunications subset
+
+Took out "mobile" since that gave a lot of mobile apps, which is not what I was looking for.
+
+```{r}
+telecomm_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("wireless", "satellite", "5g", "4g", "service provider", "prepaid calling", "messaging", "telecommunication", "telecom", "broadband", "smartphone", "cell phone"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Telecommunications",
+    str_c(industry, "Telecommunications", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(telecomm_subset)
+View(telecomm_subset)
+```
+
+
+
+
+# Arts and Media subset
+
+```{r}
+media_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("media", "streaming", "blog", "fine art", "television", "movie", "sport", "soccer", "music", "news", "book", "film", "publication", "animation", "entertainment", "concert", "video games", "gaming", "video", "tiktok", "library"), collapse = "|"))) %>%
+dplyr::filter(!str_detect(short_description, paste(c("manufactur"), collapse = "|"))) %>% # Select all records that DON'T contain these terms
+  mutate(industry = if_else(
+     is.na(industry),
+    "Media",
+    str_c(industry, "Media", sep = ", ")
+  ))
+```
+
+```{r}
+nrow(media_subset)
+View(media_subset)
+```
+
+
+# Agriculture and food subset
+
+```{r}
+agfood_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("agriculture", "food","restaurant", "farmer", "cannabis", "rehydration", "beverage", "agtech", "edible", "crop"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Agriculture/Food",
+    str_c(industry, "Agriculture/Food", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(agfood_subset)
+View(agfood_subset)
+```
+
+
+#Education subset
+
+Took out "training" since that gave a lot of non-education tech businesses.
+
+```{r}
+education_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("education(!?al)", "teach", "learning", "classroom", "university", "academic", "academy", "student", "college", "tutor", "school"), collapse = "|"))) %>%
+  dplyr::filter(!str_detect(short_description, paste(c("deep learning", "machine learning", "athletic training"), collapse = "|"))) %>% # Select all records that DON'T contain deep or machine learning
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Education",
+    str_c(industry, "Education", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(education_subset)
+View(education_subset)
+```
+
+
+# Marketing subset
+
+```{r}
+marketing_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("marketing", "branding", "advertis", "pr "), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Marketing",
+    str_c(industry, "Marketing", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(marketing_subset)
+View(marketing_subset)
+```
+
+
+# Real estate subset
+
+```{r}
+real_estate_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("real estate", "property", "rental", "landlord", "realtor", "homeowner"), collapse = "|"))) %>%
+  dplyr::filter(!(str_detect(short_description_lower, paste(c("intellectual property"), collapse = "|")))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Real Estate",
+    str_c(industry, "Real Estate", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(real_estate_subset)
+View(real_estate_subset)
+```
+
+
+# Design subset
+
+Not sure about "design"...
+
+```{r}
+design_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("design(!?ed)", "visualization", "virtual reality"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Design",
+    str_c(industry, "Design", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(design_subset)
+View(design_subset)
+```
+
+
+# Hospitality subset
+
+```{r}
+hospitality_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("hotel", "hospitality", "event management"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Hospitality",
+    str_c(industry, "Hospitality", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(hospitality_subset)
+View(hospitality_subset)
+```
+
+
+# Green tech subset
+
+```{r}
+green_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description_lower, paste(c("green(!?s)", "environmentally friendly", "solar", "wind turbine", "biodegradable", "coral reef", "clean energy", "sustainable", "renewable"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Green",
+    str_c(industry, "Green", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(green_subset)
+View(green_subset)
+```
+
+
+# Staffing Subset
+
+```{r}
+staffing_subset <- crunchbase_tech_filtered %>%
+  dplyr::filter(str_detect(short_description, paste(c("staffing", "tech talent", "scout", "recruiting"), collapse = "|"))) %>%
+
+  mutate(industry = if_else(
+     is.na(industry),
+    "Staffing",
+    str_c(industry, "Staffing", sep = ", ")
+  ))
+
+```
+
+```{r}
+nrow(staffing_subset)
+View(staffing_subset)
+```
+
+# Joining tables
+
+We don't actually want to join the tables together, since that would link the tables horizontally and create way too many columns.
+
+Since they all have identical columns, we can use row binding instead. Some businesses will be in multiple subsets, so we will want to summarize them into one record rather than duplicate, and append their industry values onto each other as a list
+
+```{r}
+combined_df <- bind_rows(healthcare_subset, med_device_subset, software_subset, hardware_subset, robotics_subset, finance_subset, ecommerce_subset, automotive_subset, construction_subset, energy_subset, aero_defense_subset, security_subset, telecomm_subset, media_subset, agfood_subset, education_subset, marketing_subset, real_estate_subset, green_subset, hospitality_subset, design_subset, staffing_subset)
+
+# Since some businesses may be in multiple industries, we will want to remove the duplicate records
+# And also keep all industry labels, rather than rewriting over any
+
+# Adapted from: https://stackoverflow.com/questions/38514988/concatenate-strings-by-group-with-dplyr
+
+combined_df_final <- combined_df %>% 
+     group_by(uuid) %>% 
+     mutate(industry = paste0(industry, collapse = ", ")) 
+
+```
+
+```{r}
+View(combined_df)
+View(combined_df_final)
+nrow(combined_df_final)
+```
+
+
+Let's find out which values are not in the combined_df table.
+
+# Finding missing businesses
+
+```{r}
+
+# Run anti-join to find all records NOT in either table
+unlabeled_businesses <- anti_join(crunchbase_tech_filtered, combined_df_final, by = "uuid")
+
+```
+
+```{r}
+nrow(unlabeled_businesses)
+View(unlabeled_businesses)
+```
+
+```{r}
+all_labeled_tech <- unlabeled_businesses %>%
+   mutate(industry = if_else(
+     is.na(industry),
+    "Other",
+    str_c(industry, "Other", sep = ", ")
+  )) %>% bind_rows(combined_df_final)%>%
+  group_by(uuid) %>%
+  summarise(across(everything(), ~ if (is.character(.)) paste(unique(.), collapse = ", ") else first(.)),  # concatenate for character columns, keep first for others
+            .groups = 'drop')
+
+View(all_labeled_tech)
+nrow(all_labeled_tech)
+  
+```
+
+Definitely still missing some businesses....
+
+# Plot tech industries
+
+Create a bar graph:
+
+```{r}
+# Split concatenated values into separate rows
+all_labeled_tech_separated <- all_labeled_tech %>%
+  separate_rows(industry, sep = ", ")  # Adjust separator if needed
+
+# Count frequencies of each industry value
+industry_counts <- all_labeled_tech_separated %>%
+  count(industry) %>%
+  arrange(desc(n))  # Sort by frequency in descending order
+
+# Create bar graph
+industrygraph = ggplot(industry_counts, aes(x = reorder(industry, -n), y = n, fill = industry)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Frequency of Each Industry",
+       x = "Industry",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(industrygraph, 
+       filename = "tech_industry_bar_graph.pdf",
+       device = "pdf",
+       height = 6, width = 8.5, units = "in")
+```
+
+# Local Business Tax
+
+Finding matches between the Crunchbase businesses and the local business tax receipts from Miami Dade County.
+
+At this point, it is best to export a CSV, open the Python notebook, and continue from there. 
+
+Can then come back to this code afterwards. 
+
+```{r}
+write.csv(crunchbase_tech_filtered, "//dartfs.dartmouth.edu/rc/lab/A/AlvarezLeonL/2024_Tech_Cluster_Paper/Data/crunchbase_tech_subset.csv")
+```
+
+
+
+
+***** GO TO PYTHON NOTEBOOK ******
+
+###########################################################################################################################
+
+***** RETURN FROM PYTHON NOTEBOOK *****
+
+
+
+
+# Read in Data from Python Notebook
+
+After running the Python Notebook, we will need to import the datasets back into R.
+
+```{r}
+litmatches <- read.csv("Data/lit_lbtr_fuzzymatches.csv")
+crunchmatches <- read.csv("Data/crunch_lbtr_fuzzymatches.csv")
+```
+
+# Split Match Formatting 
+
+# Lit Review Matches
+
+When doing fuzzy string matching with this method, Python will create a new column with match names, but formatted with extra brackets and parenthesis. See example:
+
+```{r}
+head(litmatches)
+```
+We will need to remove the special characters and separate the values before we can join tables. 
+
+First, we can create a function to extract only the values from the matches field:
+
+```{r}
+
+# For Lit Review Data
+
+# Function to extract values from the matches field
+extract_matches <- function(matches) {
+  # Remove square brackets and split the string
+  matches <- str_remove_all(matches, "\\[|\\]")
+  matches_split <- str_split(matches, "\\), \\(")[[1]]
+  
+ # Extract values for the first match
+  match1 <- str_match(matches_split[1], "'(.+?)', (\\d+)")[, 2:3]
+  company1 <- match1[1]
+  score1 <- as.numeric(match1[2])
+  
+  # Extract values for the second match
+  match2 <- str_match(matches_split[2], "'(.+?)', (\\d+)")[, 2:3]
+  company2 <- match2[1]
+  score2 <- as.numeric(match2[2])
+  
+  return(data.frame(company1 = company1, score1 = score1, company2 = company2, score2 = score2))
+}
+
+# Apply the extraction function to each row in the data frame
+extracted_matches <- litmatches %>%
+  rowwise() %>%
+  do(extract_matches(.$matches))
+
+# Combine the original data frame with the extracted matches
+litmatches <- bind_cols(litmatches, extracted_matches)
+
+# View the resulting data frame
+View(litmatches)
+
+```
+# Clean Crunchbase Matches
+
+Filtering matches to only include those with a similarity score greater than or equal to 95.
+
+```{r}
+filtered_litmatches <- litmatches %>%
+    dplyr::filter(score1 >= 95|score2 >= 95)
+
+View(filtered_litmatches)
+  
+```
+
+
+# LBTR Matches
+
+We can do the exact same steps on the local business tax record dataset.
+
+```{r}
+# For LBTR data
+
+# Function to extract values from the matches field
+extract_matches <- function(matches) {
+  # Remove square brackets and split the string
+  matches <- str_remove_all(matches, "\\[|\\]")
+  matches_split <- str_split(matches, "\\), \\(")[[1]]
+  
+ # Extract values for the first match
+  match1 <- str_match(matches_split[1], "'(.+?)', (\\d+)")[, 2:3]
+  company1 <- match1[1]
+  score1 <- as.numeric(match1[2])
+  
+  # Extract values for the second match
+  match2 <- str_match(matches_split[2], "'(.+?)', (\\d+)")[, 2:3]
+  company2 <- match2[1]
+  score2 <- as.numeric(match2[2])
+  
+  return(data.frame(company1 = company1, score1 = score1, company2 = company2, score2 = score2))
+}
+
+# Apply the extraction function to each row in the data frame
+extracted_matches <- crunchmatches %>%
+  rowwise() %>%
+  do(extract_matches(.$matches))
+
+# Combine the original data frame with the extracted matches
+crunchmatches <- bind_cols(crunchmatches, extracted_matches)
+
+
+View(crunchmatches)
+
+
+```
+
+# Clean Crunchbase Matches
+
+Filtering matches to only include those with a similarity score greater than or equal to 95.
+
+```{r}
+filtered_crunchmatches <- crunchmatches %>%
+    dplyr::filter(score1 >= 95|score2 >= 95)
+
+View(filtered_crunchmatches)
+
+  
+```
+
+
+# Read in Local Business Tax Records
+
+Read in Local Business Tax Records dataset. 
+From Miami Dade Open County: https://gis-mdc.opendata.arcgis.com/maps/local-business-tax-view
+Download this to local computer.
+I am not bothering to read it in as a shapefile because it has columns for latitude and longitude values, so can just keep it as a CSV.
+
+```{r}
+lbtr <- read.csv("X:/2024_Tech_Cluster_Paper/Data/local_business_tax_dataset.csv")
+head(lbtr)
+```
+# Join Crunch Matches to Original Crunchbase
+
+We want to join the matches to the original crunchbase table to keep the short_description field.
+
+Need to use name as the linking key, since no other columns will work. We can also remove duplicate values while doing this. 
+
+```{r}
+# Rename column of the matched company to be identical
+rn_crunchmatches1 <- filtered_crunchmatches %>%
+  rename(name = company1)  %>%
+  rename(crunchcompany2 = company2) %>%
+  rename(crunchcompany1score1 = score1) %>%
+  rename(crunchcompany1score2 = score2) %>%
+  rename(lbtrname1 = lbtr_name)
+
+# Join crunchbase matches to original crunchbase table
+crunchmatches_combined1 <- full_join(crunchbase_tech_filtered, rn_crunchmatches1, by = "name")
+
+# Repeat for company 2 name
+crunchmatches_combined2 <- filtered_crunchmatches %>%
+  rename(name = company2) %>%
+  rename(crunchcompany2score1 = score1) %>%
+  rename(crunchcompany2score2 = score2) %>%
+  rename(lbtrname2 = lbtr_name)
+
+# Join crunchbase matches to original crunchbase table
+all_crunchmatches <- full_join(crunchmatches_combined1, crunchmatches_combined2, by = "name")
+
+# Drop unnecessary columns
+columns_to_drop <- c('company1', 'matches.x', 'matches.y', 'name_lower', 'short_description_lower', 'facebook_url', 'twitter_url', 'linkedin_url', 'logo_url', 'homepage_url', 'cb_url', 'combined_stock_symbols', 'country_code')
+filtered_all_crunchmatches <- all_crunchmatches %>%
+  dplyr::select(-all_of(columns_to_drop))
+
+View(filtered_all_crunchmatches)
+```
+At this point, it's okay if there are repeating records, since there are many matches in the company1 and company2 columns.
+
+# Join Lit Review table to Tax Records
+
+We can then join the lit review table. 
+
+First, we can join it back to the original lit review table that includes valuation numbers. Next, we can join it to the lbtr table.
+
+```{r}
+# Rename linking key column for joining
+rn_litmatches <- filtered_litmatches %>%
+  rename(Company_Name = company1)
+
+# Join lit match table to original lit review table
+lit_review_matches <- full_join(original_businesses, rn_litmatches, by = "Company_Name")%>%
+  rename(BUSNAME = lbtr_name)
+
+# Narrow down LBTR dataset 
+columns_to_drop <- c('FOLIO', 'MUNICCODE', 'BUSADDR2', 'BUSADDR3', 'GEOADDR', 'RECEIPTNO', 'ACCOUNTNO', 'BUSNAICSCD','BUSFLAG', 'MAILADDR2', 'MAILADDR3', 'CD', 'GlobalID', 'ACCOUNTNO', 'RECEIPTNO', 'MUNICCODE', 'FOLIO', 'MUNBUSLOC', 'MAILSTATE', 'CATGRYCODE', 'BUSSTATE')
+filtered_lbtr <- lbtr %>%
+  dplyr::select(-all_of(columns_to_drop))
+
+# Rename column of the matched company to be identical
+rn_litmatches <- filtered_litmatches %>%
+  rename(BUSNAME = lbtr_name)
+  
+
+# Join tables and rename some columns to be more informative
+
+lbtr_match_join <- full_join(filtered_lbtr, lit_review_matches, by = "BUSNAME")
+
+View(lbtr_match_join)
+
+# Drop old columns
+columns_to_drop <- c('matches')
+lit_lbtr_match_join <- lbtr_match_join %>%
+  dplyr::select(-all_of(columns_to_drop))%>%
+  rename(BusinessName = BUSNAME) %>%
+  rename(litcompany1 = Company_Name) %>% 
+  rename(litcompany2 = company2) %>%
+  rename(litscore1 = score1) %>%
+  rename(litscore2 = score2)
+
+
+View(lit_lbtr_match_join)
+```
+
+# Join Crunchbase table to Tax Records
+
+And join the crunchbase table to the lbtr table:
+
+```{r}
+
+# Filter LBTR dataset
+columns_to_drop <- c('FOLIO', 'MUNICCODE', 'BUSADDR2', 'BUSADDR3', 'GEOADDR', 'RECEIPTNO', 'ACCOUNTNO', 'BUSNAICSCD','BUSFLAG', 'MAILADDR2', 'MAILADDR3', 'CD', 'GlobalID', 'ACCOUNTNO', 'RECEIPTNO', 'MUNICCODE', 'FOLIO', 'MUNBUSLOC', 'MAILSTATE', 'CATGRYCODE', 'BUSSTATE')
+filtered_lbtr <- lbtr %>%
+  dplyr::select(-all_of(columns_to_drop))
+
+# First, prepare to join based on the 1st company match
+# Edit table 
+rn_crunchmatches1 <- filtered_all_crunchmatches %>%
+  rename(BUSNAME = lbtrname1) 
+
+# Join
+crunchmatch1_join <- full_join(filtered_lbtr, rn_crunchmatches1, by = "BUSNAME", keep = TRUE)%>%
+  select(-'BUSNAME.y')%>%
+  rename(BusinessName = BUSNAME.x)
+
+View(crunchmatch1_join)
+
+# Now join based on 2nd company match
+rn_crunchmatches2 <- filtered_all_crunchmatches %>%
+  rename(BusinessName = lbtrname2) 
+
+# Join
+lbtr_crunchmatches <- full_join(crunchmatch1_join, rn_crunchmatches2, by = "BusinessName", keep = TRUE)
+
+View(lbtr_crunchmatches)
+
+# Rename column of the matched company to be identical
+rn_crunchmatches1 <- filtered_all_crunchmatches %>%
+  rename(BUSNAME = lbtrname1)
+
+# Join tables and rename some columns to be more informative
+
+crunch_match_join <- full_join(filtered_lbtr, rn_crunchmatches1, by = "BUSNAME", keep = TRUE) %>%
+  select(-'BUSNAME.y')%>%
+  rename(crunchcompany1 = name) %>%
+  rename(BusinessName = BUSNAME.x)
+
+# Filter final data
+columns_to_drop <- c('uuid', 'region', 'domain', 'BUSCITY', 'ZIPCODE', 'CLASSCODE', 'CLASSDESC', 'CATGRYNAME', 'OCCDESC', 'MAILNAME', 'MAILADDR', 'MAILZIP', 'MAILCITY')
+filtered_crunch_match_join <- crunch_match_join %>%
+  dplyr::select(-all_of(columns_to_drop))
+
+View(filtered_crunch_match_join)
+```
+
+Will get a warning about a many-to-many relationship, but it should still join anyway. 
+
+
+# Join Lit Review Matches and Crunchbase Matches
+
+Instead of having two separate tables, let's combine them into one! Can do this using the original lit review matches before joining with lbtr to make data easier. 
+
+```{r}
+# Rename business name field to match
+rn_litmatches_for_joining = lit_review_matches %>%
+  rename(BusinessName = BUSNAME)
+
+View(rn_litmatches_for_joining)
+
+full_lit_crunch_lbtr_matches <- full_join(rn_litmatches_for_joining, filtered_crunch_match_join, by = 'BusinessName')%>%
+  select(-'matches') %>%
+  rename(litcompany1 = Company_Name)%>%
+  rename(litcompany2 = company2)%>%
+  rename(litcompany1score = score1)%>%
+  rename(litcompany2score = score2)
+
+View(full_lit_crunch_lbtr_matches)
+
+```
+
+
+Let's drop the businesses that do not have matches, to reduce file size.
+
+```{r}
+cleaned_full_matches <- full_lit_crunch_lbtr_matches %>%
+  dplyr::filter(litcompany1score >= 95|litcompany2score >= 95|crunchcompany1score1 >= 95|crunchcompany1score2 >= 95|crunchcompany2score1 >= 95|crunchcompany2score2 >= 95)
+
+View(cleaned_full_matches)
+
+```
+
+And we can check for duplicate records:
+
+```{r}
+# Identify duplicates
+duplicated(cleaned_full_matches)
+ 
+# Sum number of duplicates
+sum(duplicated(cleaned_full_matches))
+```
+There are 52, so we will want to remove the duplicates.
+
+```{r}
+# Only save unique records
+undup_full_matches <- unique(cleaned_full_matches) %>%
+  filter(!is.na(BusinessName))
+
+View(undup_full_matches)
+nrow(undup_full_matches)
+```
+
+# View Final Matches
+
+Check that matches seem to actually match by isolating those fields.
+
+```{r}
+# Make smaller table with just match columns
+match_check <- undup_full_matches %>%
+  select(BusinessName, litcompany1, litcompany2, crunchcompany1, crunchcompany2, short_description)
+
+View(match_check)
+
+
+# Remove non-matches
+cleaned_matches <- undup_full_matches[!(row.names(undup_full_matches) %in% c("11", "12", "13", "25", "27", "32", "35", "48", "49", "59", "60", "65", "68", "85", "94", "113", "116", "135", "165", "167", "199", "208", "209", "213", "224", "230", "236", "240", "272", "282", "288", "297", "301", "309", "310", "317", "323", "330", "333", "342", "349", "350", "362", "369", "370", "384", "387", "393", "400", "413", "441", "446", "455", "462")),]
+
+View(cleaned_matches)
+
+# Find values that are not NA, since it included a lot of NAs
+almost_final_matches <- cleaned_matches %>%
+  filter(!is.na(BusinessName))
+
+View(almost_final_matches)
+```
+
+And check that these businesses are tech companies. 
+
+```{r}
+match_check2 <- almost_final_matches %>%
+  select(BusinessName, litcompany1, crunchcompany1, short_description)
+
+View(match_check2)
+
+# Remove any companies that are questionably tech
+final_matches <- almost_final_matches[!(row.names(almost_final_matches) %in% c("46", "48", "100", "112", "134", "263", "393")),]
+
+View(final_matches)
+
+
+```
+
+
+Check times
+
+```{r}
+match_check3 <- final_matches %>%
+  select(BusinessName, BUSSDATE)
+
+View(match_check3)
+```
+
+
+# Assigning yearly quarters to business start dates
+
+To make dates more legible, can assign start dates into yearly quarters, to make more legible.
+
+```{r}
+# Break up start date column into Date/Time, then M/D/Y
+yearly_qrt <- final_matches %>%
+  separate(col = BUSSDATE, into = c("Date", "Time"), sep = " ", remove = FALSE) %>%
+  separate(Date, into = c("Month", "Day", "Year"), sep = "/", convert = TRUE, remove = FALSE)
+
+# Add a new column and assign quarters
+full_match_qrt <- yearly_qrt %>% 
+  # make quarters
+  mutate(
+    quarter = case_when(
+        Month >= 1 & Month <= 3 ~ "Q1",
+        Month >= 4 & Month <= 6 ~ "Q2",
+        Month >= 7 & Month <= 9 ~ "Q3",
+        Month >= 10 & Month <= 12 ~ "Q4")
+  )
+
+# Combine year and quarter into a new column
+full_match_qrt <- full_match_qrt %>%
+  mutate(quarteryear = paste(Year, quarter))
+
+head(full_match_qrt)
+```
+# Plot business start dates
+
+Create a bar graph of when business originally began
+
+```{r}
+# Group all businesses by quarteryear
+quarter_counts <- full_match_qrt %>%
+  group_by(quarteryear) %>%
+  summarise(count = n())
+
+# Creating another version for years, since plotting quarters is a little too dense
+yearly_counts <- final_matches %>%
+  separate(col = BUSSDATE, into = c("Date", "Time"), sep = " ", remove = FALSE) %>%
+  separate(Date, into = c("Month", "Day", "Year"), sep = "/", convert = TRUE, remove = FALSE) %>%
+  mutate(year = Year) %>%
+  group_by(year) %>%
+  summarise(count = n())
+
+# Export the graph as a PDF
+pdf("X:/2024_Tech_Cluster_Paper/Graphs/tech_timeline.pdf")
+
+# Create plot
+tech_date_bargraph <- ggplot(yearly_counts, aes(x = year, y = count)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "Tech Businesses in Miami, 1980- 2024", x = "Year", y = "Count of New Businesses") +
+  theme_minimal()
+
+print(tech_date_bargraph)
+```
+```{r}
+
+```
+
+
+# Subset by Business Start Date
+
+The local business tax record data has dates for when a business began filing taxes with the local government. We can create different subsets for pre-COVID, COVID, and post-COVID.
+
+To do this efficiently, we can convert the start date column to a date-time object.
+
+# Pre-COVID (before February 2020)
+
+** UPDATE this with cleaned_full_matches)
+
+```{r}
+# Convert BUSSTART column to date-time object
+pre_covid_lbtr <- final_matches %>%
+  mutate(BUSSDATE = mdy_hms(BUSSDATE)) %>%
+# Filter out any dates later than February 2020
+  dplyr::filter(BUSSDATE < ymd("2020-02-01"))
+
+View(pre_covid_lbtr)
+
+```
+
+# COVID (between February 2020 and Dec 2022)
+* Check when CDC declared no longer emergency, good cut off point? *
+
+```{r}
+# Convert BUSSTART column to date-time object
+covid_lbtr <- final_matches %>%
+  mutate(BUSSDATE = mdy_hms(BUSSDATE)) %>%
+# Filter out any dates between February 2020 and Dec 2022
+  dplyr::filter(BUSSDATE >= ymd("2020-02-01") & BUSSDATE <= ymd("2023-05-11"))
+
+View(covid_lbtr)
+```
+
+```{r}
+# Check for accuracy
+covid_lbtr_check <- covid_lbtr %>%
+  select(BusinessName, crunchcompany1, crunchcompany2, short_description)
+
+View(covid_lbtr_check)
+
+```
+
+
+
+# Post-COVID (Jan 2023- Present)
+
+```{r}
+post_covid_lbtr <- final_matches %>%
+  mutate(BUSSDATE = mdy_hms(BUSSDATE)) %>%
+# Filter out any dates later than Dec 2022
+  dplyr::filter(BUSSDATE > ymd("2023-12-31"))
+
+View(post_covid_lbtr)
+```
+
+# Export as Shapefiles for Mapping
+
+```{r}
+# Export as shapefiles
+
+# Pre COVID:
+
+# Convert data frame to sf object
+pre_covid_sf <- st_as_sf(pre_covid_lbtr, coords = c("LON", "LAT"), crs = 4326)
+
+st_write(pre_covid_sf, "X:/2024_Tech_Cluster_Paper/Data/pre_covid_lbtr.shp")
+
+# COVID:
+
+# Convert data frame to sf object
+covid_sf <- st_as_sf(covid_lbtr, coords = c("LON", "LAT"), crs = 4326)
+
+st_write(covid_sf, "X:/2024_Tech_Cluster_Paper/Data/covid_lbtr.shp")
+
+# Post COVID:
+
+# Convert data frame to sf object
+post_covid_sf <- st_as_sf(post_covid_lbtr, coords = c("LON", "LAT"), crs = 4326)
+
+st_write(post_covid_sf, "X:/2024_Tech_Cluster_Paper/Data/post_covid_lbtr.shp")
+```
+
